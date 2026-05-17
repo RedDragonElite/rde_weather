@@ -44,7 +44,7 @@ return {
     -- ════════════════════════════════════════════════════════════
     DynamicWeather = {
         enabled = true,
-        changeInterval = {60, 120}, -- Random between 60-120 minutes
+        changeInterval = {15, 45}, -- Random between 15-45 minutes (was 60-120, too long — caused rain to lock for hours)
         weights = {
             EXTRASUNNY = 15, CLEAR = 20, NEUTRAL = 15,
             SMOG = 5, FOGGY = 5, OVERCAST = 10,
@@ -60,21 +60,26 @@ return {
         },
         seasonalWeights = {
             winter = {
-                SNOW = 25, SNOWLIGHT = 20, BLIZZARD = 10,
-                XMAS = 15, OVERCAST = 15, CLEAR = 10, EXTRASUNNY = 5,
+                -- Snow-dominant but not exclusively — some clear winter days
+                SNOW = 20, SNOWLIGHT = 18, BLIZZARD = 8,
+                XMAS = 10, OVERCAST = 18, CLEAR = 15, EXTRASUNNY = 5, FOGGY = 6,
             },
             spring = {
-                RAIN = 20, CLEARING = 18, CLOUDS = 15,
-                OVERCAST = 12, CLEAR = 20, NEUTRAL = 15,
+                -- Balanced spring: rain exists but sunny/clearing weather is equally likely
+                -- Reduced RAIN (20→10) and raised CLEAR+CLEARING to prevent rain-lock loops
+                CLEAR = 25, CLEARING = 20, NEUTRAL = 15,
+                CLOUDS = 12, OVERCAST = 10, RAIN = 10, FOGGY = 8,
             },
             summer = {
-                EXTRASUNNY = 30, CLEAR = 25, NEUTRAL = 20,
-                SMOG = 10, CLOUDS = 10, OVERCAST = 5,
+                -- Hot and mostly sunny with occasional cloud bursts
+                EXTRASUNNY = 35, CLEAR = 30, NEUTRAL = 18,
+                SMOG = 8, CLOUDS = 6, OVERCAST = 3,
             },
             autumn = {
-                FOGGY = 15, OVERCAST = 20, RAIN = 18,
-                CLOUDS = 15, CLEARING = 12, HALLOWEEN = 10, CLEAR = 10,
-            }
+                -- Moody autumn — overcast & fog dominant, some rain, but clears regularly
+                FOGGY = 14, OVERCAST = 18, RAIN = 14,
+                CLOUDS = 16, CLEARING = 15, HALLOWEEN = 8, CLEAR = 15,
+            },
         },
         transitions = {
             EXTRASUNNY = { 'CLEAR', 'NEUTRAL', 'CLOUDS' },
@@ -85,8 +90,10 @@ return {
             OVERCAST = { 'CLOUDS', 'RAIN', 'CLEARING', 'FOGGY' },
             CLOUDS = { 'OVERCAST', 'RAIN', 'CLEARING', 'NEUTRAL' },
             CLEARING = { 'CLEAR', 'NEUTRAL', 'CLOUDS', 'OVERCAST' },
-            RAIN = { 'THUNDER', 'OVERCAST', 'CLEARING', 'CLOUDS' },
-            THUNDER = { 'RAIN', 'OVERCAST', 'CLEARING' },
+            -- BUG FIX: added CLEARING exit to THUNDER and broadened RAIN exits
+            -- so rain can break out of the RAIN↔OVERCAST↔CLOUDS loop naturally.
+            RAIN    = { 'THUNDER', 'OVERCAST', 'CLEARING', 'CLOUDS', 'NEUTRAL' },
+            THUNDER = { 'RAIN', 'OVERCAST', 'CLEARING', 'CLOUDS' },
             BLIZZARD = { 'SNOW', 'SNOWLIGHT', 'OVERCAST' },
             SNOW = { 'SNOWLIGHT', 'BLIZZARD', 'OVERCAST', 'XMAS' },
             SNOWLIGHT = { 'SNOW', 'OVERCAST', 'FOGGY' },

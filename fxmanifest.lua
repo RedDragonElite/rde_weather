@@ -1,19 +1,28 @@
 fx_version 'cerulean'
 game 'gta5'
 lua54 'yes'
-
 name 'RDE | Weather & Time'
 author 'RDE | SerpentsByte'
-version '1.0.0'
-description 'Production-Ready Weather & Time System | Instant Sync | Smooth Progression | ox_core'
+version '2.1.0'
+description 'Production-Ready Weather & Time System | Instant Sync | Smooth Progression | ox_core | Nostr Logging (optional)'
 
 -- ════════════════════════════════════════════════════════════
--- 📦 DEPENDENCIES
+-- 📦 HARD DEPENDENCIES
 -- ════════════════════════════════════════════════════════════
 dependencies {
     'ox_core',
     'ox_lib',
-    'oxmysql'
+    'oxmysql',
+}
+
+-- ════════════════════════════════════════════════════════════
+-- 📦 OPTIONAL DEPENDENCY
+-- rde_nostr_log — decentralized event logging via Nostr protocol
+-- If not installed the resource runs normally without logging.
+-- Install: https://github.com/RedDragonElite/rde_nostr_log
+-- ════════════════════════════════════════════════════════════
+optional_dependencies {
+     'rde_nostr_log',
 }
 
 -- ════════════════════════════════════════════════════════════
@@ -21,16 +30,14 @@ dependencies {
 -- ════════════════════════════════════════════════════════════
 shared_scripts {
     '@ox_lib/init.lua',
-    'config.lua'
+    'config.lua',
 }
-
 server_scripts {
     '@oxmysql/lib/MySQL.lua',
-    'server.lua'
+    'server.lua',
 }
-
 client_scripts {
-    'client.lua'
+    'client.lua',
 }
 
 -- ════════════════════════════════════════════════════════════
@@ -41,7 +48,7 @@ client_scripts {
 -- # Debug Mode
 -- setr rde:debug false
 --
--- # Notifications
+-- # Weather change notifications
 -- setr rde:weather_notifications true
 --
 -- # Dynamic Weather System
@@ -54,12 +61,12 @@ client_scripts {
 -- setr rde:time_multiplier 60.0
 --
 -- ════════════════════════════════════════════════════════════
--- ✨ FEATURES v1.0.0
+-- ✨ FEATURES v2.1.0
 -- ════════════════════════════════════════════════════════════
 -- ✓ Instant sync on player spawn (0ms delay)
 -- ✓ Smooth time progression with seconds
 -- ✓ 100ms server update loop for real-time feel
--- ✓ StateBag sync for all connected players
+-- ✓ StateBag sync — throttled, only fires on minute change
 -- ✓ Database persistence with auto-save
 -- ✓ Realistic time multiplier system
 -- ✓ Dynamic weather with seasonal patterns
@@ -68,5 +75,6 @@ client_scripts {
 -- ✓ Full snow system with tracks
 -- ✓ Admin menu with ox_lib context
 -- ✓ Permission system (ox_core + ACE)
+-- ✓ Optional Nostr logging (rde_nostr_log) — graceful fallback
 -- ✓ Production-ready error handling
 -- ════════════════════════════════════════════════════════════

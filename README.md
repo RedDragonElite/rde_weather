@@ -3,7 +3,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-1.0.0-red?style=for-the-badge&logo=github)
+![Version](https://img.shields.io/badge/version-1.0.1-red?style=for-the-badge&logo=github)
 ![License](https://img.shields.io/badge/license-RDE%20Black%20Flag%20v6.66-black?style=for-the-badge)
 ![FiveM](https://img.shields.io/badge/FiveM-Compatible-orange?style=for-the-badge)
 ![ox_core](https://img.shields.io/badge/ox__core-Required-blue?style=for-the-badge)
@@ -208,6 +208,10 @@ Confirm no other weather/time resource is running simultaneously — conflicts b
 
 ## 📝 Changelog
 
+### v1.0.1 — Bugfixes
+- Fixed Snow enabled itself on Rain lol
+- Smother Weather transition
+
 ### v1.0.0 — Initial Release
 - Persistent weather state (survives restarts and crashes)
 - Persistent time state with configurable cycle speed
@@ -239,7 +243,7 @@ Guidelines: follow existing Lua conventions, comment complex logic, test on a li
 #                                                                                  #
 #      .:: RED DRAGON ELITE (RDE)  -  BLACK FLAG SOURCE LICENSE v6.66 ::.          #
 #                                                                                  #
-#   PROJECT:    RDE_WEATHER v1.0.0 (PERSISTENT WEATHER & TIME SYNC FOR FIVEM)      #
+#   PROJECT:    RDE_WEATHER v1.0.1 (PERSISTENT WEATHER & TIME SYNC FOR FIVEM)      #
 #   ARCHITECT:  .:: RDE ⧌ Shin [△ ᛋᛅᚱᛒᛅᚾᛏᛋ ᛒᛁᛏᛅ ▽] ::. | https://rd-elite.com      #
 #   ORIGIN:     https://github.com/RedDragonElite                                  #
 #                                                                                  #

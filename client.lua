@@ -9,6 +9,11 @@ local State = {
         transitioning = false,
         windSpeed    = 5.0,
         windDirection = 0.0,
+        -- Live, currently-applied wind values. Distinct from windSpeed/
+        -- windDirection (which hold the server's TARGET wind) so the
+        -- transition lerp always has a true "from" value to start at.
+        currentWindSpeed     = 5.0,
+        currentWindDirection = 0.0,
         snowEnabled  = false,
     },
     time = {
@@ -57,6 +62,8 @@ local function InitializeWeatherTime()
     State.weather.target       = data.weather.target
     State.weather.windSpeed    = data.weather.windSpeed
     State.weather.windDirection = data.weather.windDirection
+    State.weather.currentWindSpeed     = data.weather.windSpeed
+    State.weather.currentWindDirection = data.weather.windDirection
     State.weather.snowEnabled  = data.weather.snowEnabled
     State.weather.transitioning = data.weather.transitioning
 
@@ -132,9 +139,24 @@ AddStateBagChangeHandler('rdeWeather', 'global', function(bagName, key, value)
         ))
     end
 
-    -- Apply wind instantly
-    SetWindSpeed(State.weather.windSpeed)
-    SetWindDirection(State.weather.windDirection)
+    -- FIX v2.2.1: wind used to snap instantly here, the instant the StateBag
+    -- arrived — completely independent of the weather blend that starts a
+    -- few lines below. Result: gusts would jump hard even while the sky was
+    -- still smoothly crossfading, which read as "instant" despite the sky
+    -- transition working fine. Wind is now lerped INSIDE StartWeatherTransition
+    -- on the same easing curve as the sky. We only snap it here as a fallback
+    -- for cases where no actual weather transition is about to run (e.g. a
+    -- wind-only change via /setwind with the weather staying the same).
+    local willTransition = State.initialized
+        and State.weather.current ~= State.weather.target
+        and not State.transition.active
+
+    if not willTransition then
+        SetWindSpeed(State.weather.windSpeed)
+        SetWindDirection(State.weather.windDirection)
+        State.weather.currentWindSpeed     = State.weather.windSpeed
+        State.weather.currentWindDirection = State.weather.windDirection
+    end
 
     -- FIX: snow runs in its own thread — avoids blocking the StateBag handler
     CreateThread(function()
@@ -142,9 +164,7 @@ AddStateBagChangeHandler('rdeWeather', 'global', function(bagName, key, value)
     end)
 
     -- Start transition only when needed and not already running
-    if State.initialized
-    and State.weather.current ~= State.weather.target
-    and not State.transition.active then
+    if willTransition then
         StartWeatherTransition()
     end
 end)
@@ -182,24 +202,103 @@ function StartWeatherTransition()
     -- on every weather change (when Config.UI.notifications.showWeatherChange is true).
     -- A second local notify here would give every player two popups. Removed.
 
+    -- ════════════════════════════════════════════════════════════
+    -- PERF/QUALITY FIX v2.2.1 — manual stepped blend instead of relying
+    -- on a single SetWeatherTypeOvertimePersist(target, duration) call.
+    --
+    -- That native is a black box: there's no guarantee its internal blend
+    -- finishes exactly when our own Wait(duration) does. The old code then
+    -- force-finalized with THREE back-to-back instant natives the moment
+    -- our Wait ended (SetWeatherTypePersist / SetWeatherTypeNow /
+    -- SetWeatherTypeNowPersist) — if the engine's blend hadn't actually
+    -- finished yet, that yanked the weather to its final state, which is
+    -- exactly the "zack, abgehackt" snap being reported.
+    --
+    -- This drives the blend ourselves via SetWeatherTypeTransition(from,
+    -- to, percent), ticked over Config.Weather.transitionSteps steps
+    -- (one every ~100ms instead of the old 500ms) across transitionDuration
+    -- seconds, with a sine ease-in/out curve so the blend doesn't read as
+    -- a constant-speed crossfade. Wind is lerped on the exact same curve
+    -- instead of snapping instantly, since a hard wind jump mid-blend was
+    -- the other big contributor to the "instant" feeling even when the
+    -- sky itself was blending fine.
+    -- ════════════════════════════════════════════════════════════
     CreateThread(function()
-        local duration = Config.Weather.transitionDuration * 1000
+        local fromWeather = State.weather.current
         local blendTarget = State.weather.target  -- capture target at transition start
+
+        local steps    = math.max(1, Config.Weather.transitionSteps or 450)
+        local duration = Config.Weather.transitionDuration * 1000
+        local stepWait = math.max(0, duration / steps)
+
+        local fromHash = GetHashKey(fromWeather)
+        local toHash   = GetHashKey(blendTarget)
+
+        -- Wind lerp setup — only if enabled and a real change is happening.
+        local windFromSpeed = State.weather.currentWindSpeed or State.weather.windSpeed
+        local windFromDir   = State.weather.currentWindDirection or State.weather.windDirection
+        local windToSpeed   = State.weather.windSpeed
+        local windToDir     = State.weather.windDirection
+        local doWindLerp    = Config.Weather.windTransition
+            and (windFromSpeed ~= windToSpeed or windFromDir ~= windToDir)
+
+        -- Shortest angular path for direction so it doesn't spin the long
+        -- way around (e.g. 350° → 10° should drift +20°, not -340°).
+        local windDirDelta = 0.0
+        if doWindLerp then
+            windDirDelta = ((windToDir - windFromDir + 540) % 360) - 180
+        end
+
+        local useEasing = Config.Weather.transitionEasing ~= 'linear'
 
         ClearOverrideWeather()
         ClearWeatherTypePersist()
-        SetWeatherTypeOvertimePersist(blendTarget, Config.Weather.transitionDuration)
 
-        Wait(duration)
+        for step = 1, steps do
+            -- A new target may arrive mid-blend (server pushed another
+            -- change before this one finished) — bail out early and let
+            -- the restart-check below kick off a fresh transition toward
+            -- the new target instead of finishing a now-stale blend.
+            if State.weather.target ~= blendTarget then break end
 
-        -- Finalise the weather we actually blended to
-        State.weather.current     = blendTarget
+            local linear  = step / steps
+            -- Sine ease-in/out: starts slow, speeds through the middle,
+            -- eases out at the end — mirrors how real weather fronts move.
+            local percent = useEasing
+                and (0.5 - 0.5 * math.cos(linear * math.pi))
+                or  linear
+
+            State.transition.progress = percent
+            SetWeatherTypeTransition(fromHash, toHash, percent)
+
+            if doWindLerp then
+                local windSpeed = windFromSpeed + (windToSpeed - windFromSpeed) * percent
+                local windDir   = (windFromDir + windDirDelta * percent) % 360
+                State.weather.currentWindSpeed     = windSpeed
+                State.weather.currentWindDirection = windDir
+                SetWindSpeed(windSpeed)
+                SetWindDirection(windDir)
+            end
+
+            Wait(stepWait)
+        end
+
+        -- Lock in whatever we actually finished blending toward. At
+        -- percent=1.0 (or wherever we broke out) the screen already shows
+        -- this weather, so persisting it here causes no visible jump.
+        local finalWeather = (State.weather.target == blendTarget) and blendTarget or State.weather.current
+        SetWeatherTypeNowPersist(finalWeather)
+
+        if doWindLerp and State.weather.target == blendTarget then
+            State.weather.currentWindSpeed     = windToSpeed
+            State.weather.currentWindDirection = windToDir
+            SetWindSpeed(windToSpeed)
+            SetWindDirection(windToDir)
+        end
+
+        State.weather.current     = finalWeather
         State.transition.active   = false
         State.transition.progress = 1.0
-
-        SetWeatherTypePersist(blendTarget)
-        SetWeatherTypeNow(blendTarget)
-        SetWeatherTypeNowPersist(blendTarget)
 
         -- BUG FIX: if the server pushed a new target while we were transitioning,
         -- the statebag handler was blocked by active=true and couldn't start a
@@ -316,7 +415,11 @@ CreateThread(function()
     Wait(6000)
     while Config.Wind.enabled do
         Wait(10000)
-        if State.initialized then
+        -- FIX v2.2.1: skip while a weather transition is active — it's
+        -- already lerping wind every ~100ms on its own curve, and this
+        -- 10s refresh would otherwise yank wind straight to the final
+        -- value mid-blend, undoing the smooth lerp.
+        if State.initialized and not State.transition.active then
             SetWindSpeed(State.weather.windSpeed)
             SetWindDirection(State.weather.windDirection)
         end

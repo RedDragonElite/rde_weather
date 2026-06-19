@@ -3,7 +3,7 @@ game 'gta5'
 lua54 'yes'
 name 'RDE | Weather & Time'
 author 'RDE | SerpentsByte'
-version '2.1.0'
+version '2.2.1'
 description 'Production-Ready Weather & Time System | Instant Sync | Smooth Progression | ox_core | Nostr Logging (optional)'
 
 -- ════════════════════════════════════════════════════════════

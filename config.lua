@@ -18,8 +18,16 @@ return {
     Weather = {
         enabled = true,
         defaultWeather = 'CLEAR',
-        transitionDuration = 45, -- Smooth 45-second transitions
-        transitionSteps = 90,
+        transitionDuration = 45,   -- Smooth 45-second transitions
+        transitionSteps = 450,    -- v2.2.1: one step every 100ms instead of every 500ms.
+                                   -- GTA's weather/particle/sky systems visibly stair-step
+                                   -- when fed coarse percent jumps; 100ms ticks read as
+                                   -- continuous motion without being wasteful.
+        transitionEasing = 'sine', -- 'linear' | 'sine' — sine eases in/out so the blend
+                                   -- isn't a constant-speed crossfade (real weather drifts
+                                   -- in slowly, then drifts out slowly).
+        windTransition = true,    -- lerp wind speed/direction across the same duration
+                                   -- instead of snapping it at the start of the blend.
         types = {
             { value = 'EXTRASUNNY',  label = '☀️ Extra Sunny',     temp = {25, 35}, windBase = 1.5 },
             { value = 'CLEAR',       label = '🌤️ Clear',          temp = {20, 30}, windBase = 2.0 },
@@ -45,6 +53,13 @@ return {
     DynamicWeather = {
         enabled = true,
         changeInterval = {15, 45}, -- Random between 15-45 minutes (was 60-120, too long — caused rain to lock for hours)
+        -- 🌈 STREAK BREAKER: after this many consecutive non-clear weather
+        -- changes in a row, the NEXT change is guaranteed to move toward
+        -- CLEARING/CLEAR instead of rolling the weighted dice again. Caps
+        -- the worst-case length of a bad-weather run without touching the
+        -- seasonal weights below — pure variance protection.
+        badWeatherStreakLimit = 3,
+        goodWeatherTypes = { CLEAR = true, EXTRASUNNY = true },
         weights = {
             EXTRASUNNY = 15, CLEAR = 20, NEUTRAL = 15,
             SMOG = 5, FOGGY = 5, OVERCAST = 10,

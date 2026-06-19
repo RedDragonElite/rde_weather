@@ -22,6 +22,7 @@ local State = {
     lastSave       = 0,
     timeOffset     = 0,
     lastTimeUpdate = os.time(),
+    consecutiveBadWeather = 0, -- streak-breaker: counts non-clear changes in a row
 }
 
 -- ════════════════════════════════════════════════════════════
@@ -205,6 +206,20 @@ local function GetNextWeather()
     local transitions = Config.DynamicWeather.transitions[State.currentWeather]
     local weights = GetWeatherWeights()
 
+    -- 🌈 STREAK BREAKER — see config.lua DynamicWeather.badWeatherStreakLimit.
+    -- Don't roll the dice again if we've already had a run of bad weather —
+    -- force the natural exit path (CLEARING, or CLEAR directly if reachable)
+    -- instead. Falls through to the normal weighted pick if the current
+    -- weather has neither in its transition list.
+    if State.consecutiveBadWeather >= Config.DynamicWeather.badWeatherStreakLimit and transitions then
+        for _, w in ipairs(transitions) do
+            if w == 'CLEARING' then return 'CLEARING' end
+        end
+        for _, w in ipairs(transitions) do
+            if w == 'CLEAR' then return 'CLEAR' end
+        end
+    end
+
     if not transitions or #transitions == 0 then
         local totalWeight = 0
         local options = {}
@@ -265,6 +280,15 @@ local function ChangeWeather(newWeather, isAuto, adminName)
     State.currentWeather  = newWeather
     State.targetWeather   = newWeather
     State.isTransitioning = true
+
+    -- 🌈 STREAK TRACKING — feeds the GetNextWeather() streak-breaker above.
+    -- Lives here (not in the auto-loop) so admin-forced changes via /weather
+    -- also reset/advance the streak correctly.
+    if Config.DynamicWeather.goodWeatherTypes[newWeather] then
+        State.consecutiveBadWeather = 0
+    else
+        State.consecutiveBadWeather = State.consecutiveBadWeather + 1
+    end
 
     if Config.Snow.requireSnowWeather then
         -- BUG FIX: find() returns a number (position) or nil — must convert to boolean
@@ -338,7 +362,14 @@ local function ChangeWeather(newWeather, isAuto, adminName)
         })
     end
 
-    SetTimeout(Config.Weather.transitionDuration * 1000, function()
+    -- FIX v2.2.1: small safety buffer (2s) on top of transitionDuration.
+    -- Clients only start their local blend once the StateBag change reaches
+    -- them, which is a network round-trip after this event fires server-side.
+    -- Without a buffer, ForceSyncState() here could close the transition
+    -- window (isTransitioning = false) a moment before a laggier client has
+    -- actually finished blending, letting the 60s persistence/refresh loops
+    -- stomp on a still-running local transition.
+    SetTimeout((Config.Weather.transitionDuration + 2) * 1000, function()
         State.isTransitioning = false
         ForceSyncState()
     end)
